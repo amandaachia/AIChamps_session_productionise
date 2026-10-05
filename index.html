@@ -74,6 +74,23 @@
       background: #555;
     }
 
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+
+    #status {
+      text-align: center;
+      color: #666;
+      padding: 15px 0;
+    }
+
+    #error {
+      color: #b00020;
+      text-align: center;
+      margin-top: 15px;
+    }
+
     #result {
       margin-top: 25px;
       padding-top: 20px;
@@ -104,55 +121,15 @@
   <div class="container">
     <h1>☕ Café Bill Calculator</h1>
 
-    <div class="item">
-      <div class="item-info">
-        <div class="item-name">Chicken Rice</div>
-        <div class="price">$4.50</div>
-      </div>
-      <input type="number" id="chickenRice" min="0" value="0">
-    </div>
+    <div id="status">Loading menu...</div>
 
-    <div class="item">
-      <div class="item-info">
-        <div class="item-name">Nasi Lemak</div>
-        <div class="price">$4.00</div>
-      </div>
-      <input type="number" id="nasiLemak" min="0" value="0">
-    </div>
+    <div id="menu"></div>
 
-    <div class="item">
-      <div class="item-info">
-        <div class="item-name">Laksa</div>
-        <div class="price">$5.00</div>
-      </div>
-      <input type="number" id="laksa" min="0" value="0">
-    </div>
+    <button id="calculateButton" onclick="calculateBill()" disabled>
+      Calculate Bill
+    </button>
 
-    <div class="item">
-      <div class="item-info">
-        <div class="item-name">Kopi</div>
-        <div class="price">$1.50</div>
-      </div>
-      <input type="number" id="kopi" min="0" value="0">
-    </div>
-
-    <div class="item">
-      <div class="item-info">
-        <div class="item-name">Teh</div>
-        <div class="price">$1.30</div>
-      </div>
-      <input type="number" id="teh" min="0" value="0">
-    </div>
-
-    <div class="item">
-      <div class="item-info">
-        <div class="item-name">Milo</div>
-        <div class="price">$2.00</div>
-      </div>
-      <input type="number" id="milo" min="0" value="0">
-    </div>
-
-    <button onclick="calculateBill()">Calculate Bill</button>
+    <div id="error"></div>
 
     <div id="result">
       <div id="billDetails"></div>
@@ -165,14 +142,98 @@
   </div>
 
   <script>
-    const menu = [
-      { id: "chickenRice", name: "Chicken Rice", price: 4.50 },
-      { id: "nasiLemak", name: "Nasi Lemak", price: 4.00 },
-      { id: "laksa", name: "Laksa", price: 5.00 },
-      { id: "kopi", name: "Kopi", price: 1.50 },
-      { id: "teh", name: "Teh", price: 1.30 },
-      { id: "milo", name: "Milo", price: 2.00 }
-    ];
+    let menu = [];
+
+    async function loadMenu() {
+      const status = document.getElementById("status");
+      const error = document.getElementById("error");
+      const calculateButton = document.getElementById("calculateButton");
+
+      try {
+        const response = await fetch("menu.csv");
+
+        if (!response.ok) {
+          throw new Error("Could not load menu.csv");
+        }
+
+        const csvText = await response.text();
+
+        menu = parseCSV(csvText);
+
+        if (menu.length === 0) {
+          throw new Error("No menu items found in menu.csv");
+        }
+
+        displayMenu();
+
+        status.style.display = "none";
+        error.textContent = "";
+        calculateButton.disabled = false;
+
+      } catch (err) {
+        status.style.display = "none";
+        error.textContent = "Unable to load the menu. Please check menu.csv.";
+        console.error(err);
+      }
+    }
+
+    function parseCSV(csvText) {
+      const lines = csvText
+        .trim()
+        .split(/\r?\n/)
+        .filter(line => line.trim() !== "");
+
+      // Remove the header row.
+      lines.shift();
+
+      return lines
+        .map((line, index) => {
+          const parts = line.split(",");
+
+          const name = parts[0]?.trim();
+          const price = parseFloat(parts[1]);
+
+          if (!name || isNaN(price)) {
+            return null;
+          }
+
+          return {
+            id: "item-" + index,
+            name: name,
+            price: price
+          };
+        })
+        .filter(item => item !== null);
+    }
+
+    function displayMenu() {
+      const menuContainer = document.getElementById("menu");
+
+      menuContainer.innerHTML = "";
+
+      menu.forEach(item => {
+        const itemElement = document.createElement("div");
+        itemElement.className = "item";
+
+        itemElement.innerHTML = `
+          <div class="item-info">
+            <div class="item-name">${escapeHTML(item.name)}</div>
+            <div class="price">$${item.price.toFixed(2)}</div>
+          </div>
+
+          <input
+            type="number"
+            id="${item.id}"
+            min="0"
+            step="1"
+            value="0"
+            aria-label="Quantity for ${escapeHTML(item.name)}"
+          >
+        `;
+
+        menuContainer.appendChild(itemElement);
+      });
+    }
 
     function calculateBill() {
       let total = 0;
@@ -180,18 +241,23 @@
 
       menu.forEach(item => {
         const input = document.getElementById(item.id);
-        const quantity = Math.max(0, parseInt(input.value) || 0);
 
-        // Keep quantities as non-negative whole numbers.
+        let quantity = parseInt(input.value, 10);
+
+        if (isNaN(quantity) || quantity < 0) {
+          quantity = 0;
+        }
+
         input.value = quantity;
 
         if (quantity > 0) {
           const subtotal = quantity * item.price;
+
           total += subtotal;
 
           billHTML += `
             <div class="bill-row">
-              <span>${item.name} × ${quantity}</span>
+              <span>${escapeHTML(item.name)} × ${quantity}</span>
               <span>$${subtotal.toFixed(2)}</span>
             </div>
           `;
@@ -203,12 +269,28 @@
       }
 
       document.getElementById("billDetails").innerHTML = billHTML;
+
       document.getElementById("totalAmount").textContent =
         "$" + total.toFixed(2);
 
       document.getElementById("result").style.display = "block";
     }
+
+    function escapeHTML(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    loadMenu();
   </script>
 
+  name,price
+Chicken Rice,4.50
+Nasi Lemak,4.00
+Laksa,5.00
+Kopi,1.50
+Teh,1.30
+Milo,2.00
 </body>
 </html>
